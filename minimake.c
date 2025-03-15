@@ -719,6 +719,10 @@ minimake_result minimake_execute_chain(minimake* m, mm_sv* chain, size_t chain_l
             }
         }
     }
+    if (!cmd) {
+        /* no work has been done! */
+        printf("\"%.*s\" is up to date\n", (int)chain[0].size, chain[0].data);
+    }
 cleanup:
     if (cmd) {
         m->free(cmd);
@@ -736,14 +740,14 @@ int main(int argc, char** argv) {
 
     char* buffer = NULL;
     size_t size = 0;
-    minimake_result result = minimake_read_makefile(&m, "Minimakefile", &buffer, &size);
+    minimake_result result = minimake_read_makefile(&m, "Makefile", &buffer, &size);
     if (!result.ok) {
-        printf("ERROR: %s\n", result.message);
+        printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
     }
     result = minimake_parse(&m, "Minimakefile", buffer, size);
     if (!result.ok) {
-        printf("ERROR: %s\n", result.message);
+        printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
     }
 
@@ -759,14 +763,14 @@ int main(int argc, char** argv) {
 
     result = minimake_resolve(&m, target, &chain, &chain_len);
     if (!result.ok) {
-        printf("ERROR: %s\n", result.message);
+        printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
     }
 
     /* now we have the chain, so we can start walking it */
     result = minimake_execute_chain(&m, chain, chain_len);
     if (!result.ok) {
-        printf("ERROR: %s\n", result.message);
+        printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
     }
 
