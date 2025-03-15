@@ -28,6 +28,14 @@ typedef struct {
     size_t size;
 } mm_sv;
 
+/* creates a mm_sv from a c string, mostly useful for unit tests */
+mm_sv minimake_cstr_stringview(const char* s) {
+    mm_sv sv;
+    sv.data = s;
+    sv.size = strlen(s);
+    return sv;
+}
+
 typedef struct {
     mm_sv target;
     mm_sv dependencies[64];
@@ -114,14 +122,14 @@ typedef enum {
     MINIMAKE_TOK_WORD,
     MINIMAKE_TOK_COLON,
     MINIMAKE_TOK_NEWLINE,
-    MINIMAKE_TOK_EOF
+    MINIMAKE_TOK_COMMAND,
 } minimake_token_type;
 
 static const char* minimake_token_type_str[] = {
     "word",
     "colon",
     "newline",
-    "eof"
+    "command",
 };
 
 typedef struct {
@@ -147,7 +155,7 @@ static minimake_result minimake_tokenize(minimake* m, const char* buffer, size_t
     /*
      * parsing the grammar, which is:
      *
-     * recipe       = target ':' dependencies '\n' commands '\n'
+     * recipe       = target ':' dependencies '\n' '\t' commands '\n'
      * target       = +ALPHANUM
      * dependencies = *ALPHANUM
      * commands     = +ALPHANUM
@@ -161,11 +169,10 @@ static minimake_result minimake_tokenize(minimake* m, const char* buffer, size_t
     for (; *p; ++p) {
         (*ptokens)[*n_tokens].line = line;
         (*ptokens)[*n_tokens].column = column;
+        ++column;
         if (*p == '\n') {
             column = 1;
             ++line;
-        } else {
-            ++column;
         }
         if (*p == '\n') {
             (*ptokens)[*n_tokens].type = MINIMAKE_TOK_NEWLINE;
@@ -179,21 +186,36 @@ static minimake_result minimake_tokenize(minimake* m, const char* buffer, size_t
             ++(*n_tokens);
         } else if (*p == '#') {
             /* skip comments */
+            --column;
             while (*p && *p != '\n') {
                 ++p;
+                ++column;
             }
             // unskip the newline so we can tokenize it
             if (*p == '\n') {
                 --p;
             }
-        } else if (*p == ' ' || *p == '\t') {
+        } else if (*p == ' ') {
             /* skip whitespace */
+        } else if (*p == '\t') {
+            /* command */
+            (*ptokens)[*n_tokens].type = MINIMAKE_TOK_COMMAND;
+            (*ptokens)[*n_tokens].start = p + 1;
+            while (*p != '\n') {
+                ++p;
+                ++column;
+            }
+            (*ptokens)[*n_tokens].end = p;
+            --p;
+            ++(*n_tokens);
         } else {
             /* target or dependency or part of a command */
             (*ptokens)[*n_tokens].type = MINIMAKE_TOK_WORD;
             (*ptokens)[*n_tokens].start = p;
+            --column;
             while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != ':') {
                 ++p;
+                ++column;
             }
             (*ptokens)[*n_tokens].end = p;
             --p;
@@ -277,7 +299,7 @@ UTEST(tokenize, target_dependency_command) {
     ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
     ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
     ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
     ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
     minimake_free(&m);
 }
@@ -463,21 +485,25 @@ minimake_result minimake_parse(minimake* m, const char* makefile) {
             goto cleanup;
         }
 
-        while (tokens[i].type == MINIMAKE_TOK_WORD && i < n_tokens) {
+        if (tokens[i].type == MINIMAKE_TOK_NEWLINE) {
+            MINIMAKE_ERR_EXPECTED(tokens[i], "command(s)");
+            result = (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "no context" };
+            goto cleanup;
+        }
+        while (tokens[i].type == MINIMAKE_TOK_COMMAND && i < n_tokens) {
             if (rule->n_commands == 128) {
                 result = (minimake_result) { .ok = 0, .message = "too many commands", .context = "no context" };
                 goto cleanup;
             }
-            /* can't fail */
-            rule->commands[rule->n_commands] = tok_expect(tokens, n_tokens, &i, MINIMAKE_TOK_WORD);
+            rule->commands[rule->n_commands] = tok_expect(tokens, n_tokens, &i, MINIMAKE_TOK_COMMAND);
+            if (!rule->commands[rule->n_commands].data) {
+                MINIMAKE_ERR_EXPECTED(tokens[i], "command");
+                result = (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "no context" };
+                goto cleanup;
+            }
+            newline = tok_expect(tokens, n_tokens, &i, MINIMAKE_TOK_NEWLINE);
+            /* ignore if this fails */
             ++rule->n_commands;
-        }
-
-        newline = tok_expect(tokens, n_tokens, &i, MINIMAKE_TOK_NEWLINE);
-        if (!newline.data) {
-            MINIMAKE_ERR_EXPECTED(tokens[i], "newline");
-            result = (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "no context" };
-            goto cleanup;
         }
     }
 
@@ -494,15 +520,86 @@ cleanup:
     return result;
 }
 
-minimake_result minimake_resolve(minimake* m) {
+minimake_result minimake_resolve(minimake* m, mm_sv target) {
     if (!m) {
         return minimake_result_invalid_arguments;
     }
     minimake_result result = minimake_result_ok;
 
+    /* We initialize a chain (array) of targets, which will be our *inverted* todo list of targets to check.
+    "Inverted" meaning that it starts with the target we want, and the following elements are sort of a flat
+    tree structure with all the elements required, like a 1-D representation of the dependency tree.
+    If multiple elements in the tree depend on the same dependency, we don't really mind that; we keep inserting
+    that dependency every time we see that we need it. This means that, at the very end, we may have multiple
+    copies of the same dependency in the tree. When we later process all the dependencies, we can keep track of
+    which are already confirmed, and then we can skip those extra elements. This also means, though, that we
+    will not easily detect circular dependencies. We need to find a way to fix that.
+    We deliberately don't check if we already resolved a dependency, because that way we can properly handle multiple
+    dependencies. */
 
+    size_t chain_capacity = 16;
+    mm_sv* chain = m->alloc(sizeof(mm_sv) * chain_capacity);
+    if (!chain) {
+        result = (minimake_result) { .ok = 0, .message = strerror(errno), .context = "allocating chain" };
+        goto cleanup;
+    }
+    memset(chain, 0, sizeof(mm_sv) * chain_capacity);
+    size_t n_chain = 0;
+
+    chain[n_chain++] = target;
+
+    /* iterate over all existing make-rules */
+    for (size_t i = 0; i < n_chain; ++i) {
+        for (size_t j = 0; j < m->n_rules; ++j) {
+            /* we'll call make rules a "recipe" */
+            minimake_rule* recipe = &m->rules[j];
+            if (recipe->target.size == chain[i].size && memcmp(recipe->target.data, chain[i].data, chain[i].size) == 0) {
+                /* we found the rule we need */
+                /* now add all dependencies of this rule to the chain */
+                for (size_t k = 0; k < recipe->n_dependencies; ++k) {
+                    mm_sv dependency = recipe->dependencies[k];
+                    chain[n_chain++] = dependency;
+                    /* realloc if there's no more space */
+                    if (n_chain >= chain_capacity) {
+                        chain_capacity *= 2;
+                        mm_sv* new_chain = m->alloc(sizeof(mm_sv) * chain_capacity);
+                        if (!new_chain) {
+                            result = (minimake_result) { .ok = 0, .message = strerror(errno), .context = "allocating chain" };
+                            goto cleanup;
+                        }
+                        memcpy(new_chain, chain, sizeof(mm_sv) * chain_capacity);
+                        m->free(chain);
+                        chain = new_chain;
+                    }
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < n_chain; ++i) {
+        printf("node: %.*s\n", (int)chain[i].size, chain[i].data);
+    }
+
+    // TODO: free the chain
+
+cleanup:
+    if (chain) {
+        m->free(chain);
+    }
 
     return result;
+}
+
+UTEST(resolve, simple_rule) {
+    minimake m = minimake_init(malloc, free);
+
+    minimake_rule rules[2];
+    rules[0].target = minimake_cstr_stringview("hello-world");
+    rules[1].target = minimake_cstr_stringview("test-test");
+    rules[1].dependencies[0] = minimake_cstr_stringview("hello-world");
+    rules[1].n_dependencies = 1;
+
+    minimake_free(&m);
 }
 
 #ifdef MINIMAKE_TESTS
@@ -529,7 +626,7 @@ int main(void) {
         }
     }
 
-    result = minimake_resolve(&m);
+    result = minimake_resolve(&m, m.rules[0].target);
     if (!result.ok) {
         printf("ERROR: %s\n", result.message);
     }
