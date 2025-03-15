@@ -6,6 +6,21 @@ It aims to be so simple that the `minimake.c` can be distributed with a program'
 
 I was inspired to build this by the [no-build ("nob") build system](https://github.com/tsoding/nob.h). I find this approach meaningful, but I'd rather write simple Makefile rules.
 
+## What does it do?
+
+It **does**:
+- Run one or more rules to create a target
+- Use "last modified" file metadata to determine if something is outdated
+- Rebuild when dependencies change
+
+Or, in terms of differences from existing tools:
+
+It's like GNU/BSD Make, but:
+- No variables (neither `${...}` nor `...=...` nor `$...`)
+- No functions
+- No automatic rules, like *.o from *.c
+- No .PHONY targets
+
 ## Compatibility
 
 *All* Minimake make-files are *valid GNU/BSD Makefiles*.
@@ -15,15 +30,6 @@ I was inspired to build this by the [no-build ("nob") build system](https://gith
 See the contained [Makefile](./Makefile) for a complete example.
 
 ## Grammar
-
-### Quick & Dirty
-
-Like GNU/BSD Make, but:
-- No variables (neither `${...}` nor `...=...` nor `$...`)
-- No functions
-- No automatic rules, like *.o from *.c
-
-### Full Grammar
 
 ```
 makefile   ::= rule*
