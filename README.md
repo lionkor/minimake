@@ -32,3 +32,11 @@ target     ::= [^: \n]+
 dependency ::= [^: \n]+
 command    ::= '\t' [^\n]* '\n'
 ```
+
+### How to use
+
+Simply copy the `minimake.c` into your project and write a minimake makefile.
+
+**If you want to contribute to minimake**, here are a few important details:
+- I'm very happy to increase the amount of supported makefile syntax
+- There are unit-tests, which you can run by compiling with `-DMINIMAKE_TESTS`

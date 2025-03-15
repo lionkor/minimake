@@ -34,13 +34,6 @@ SOFTWARE.
 
 #ifdef MINIMAKE_TESTS
 #include "vendor/utest.h"
-#else
-/* these macros exist to turn all the utest code into dead code, and
-   thus make the compiler eliminate it. */
-#define UTEST(a, b) static void _test_##a_##b(void)
-#define ASSERT_TRUE(...)
-#define ASSERT_EQ(...)
-#define ASSERT_STREQ(...)
 #endif
 
 typedef struct {
@@ -160,7 +153,7 @@ typedef struct {
     uint32_t column;
 } minimake_token;
 
-static minimake_result minimake_tokenize(minimake* m, const char* buffer, size_t size, minimake_token** ptokens, size_t* n_tokens) {
+static minimake_result minimake_tokenize(minimake* m, const char* buffer, minimake_token** ptokens, size_t* n_tokens) {
     size_t max_tokens = 1024;
     minimake_token* new_tokens = NULL;
     minimake_result result = minimake_result_ok;
@@ -263,164 +256,6 @@ cleanup:
     return result;
 }
 
-UTEST(tokenize, empty) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "";
-    size_t size = 0;
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 0);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, target_only) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "target:\n";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 3);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, target_dependency) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "target: dependency\n";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 4);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, target_dependency_command) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "target: dependency\n\tcommand\n";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 6);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
-    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, words) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "these are words\nand these are too";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 8);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_WORD);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, specials_only) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = ":\n\n\n:::";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 7);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_COLON);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, comments) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "target: # comment\n";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 3);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, comments_and_words) {
-    minimake m = minimake_init(NULL, NULL);
-    const char* buffer = "target: # comment\nword\n";
-    size_t size = strlen(buffer);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, buffer, size, &tokens, &n_tokens);
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 5);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
-UTEST(tokenize, complex_case) {
-    const char* makefile = "simple_rule: test-dep\n"
-                           "\ttouch simple_rule\n"
-                           "test-dep: foo bar\n";
-    minimake m = minimake_init(NULL, NULL);
-    minimake_token* tokens = NULL;
-    size_t n_tokens = 0;
-    minimake_result result = minimake_tokenize(&m, makefile, strlen(makefile), &tokens, &n_tokens);
-    if (!result.ok) {
-        printf("error: %s\n", result.message);
-    }
-    ASSERT_TRUE(result.ok);
-    ASSERT_EQ(n_tokens, 11);
-    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
-    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
-    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[7].type, MINIMAKE_TOK_COLON);
-    ASSERT_EQ(tokens[8].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[9].type, MINIMAKE_TOK_WORD);
-    ASSERT_EQ(tokens[10].type, MINIMAKE_TOK_NEWLINE);
-    minimake_free(&m);
-}
-
 static mm_sv tok_expect(minimake_token* tokens, size_t n_tokens, size_t* i, minimake_token_type type) {
     mm_sv sv = { .data = NULL, .size = 0 };
     if (*i >= n_tokens) {
@@ -434,7 +269,7 @@ static mm_sv tok_expect(minimake_token* tokens, size_t n_tokens, size_t* i, mini
     return sv;
 }
 
-static char ERR_BUF[256];
+static char ERR_BUF[8196];
 #define MINIMAKE_ERR_EXPECTED(token, expected)                          \
     do {                                                                \
         memset(ERR_BUF, 0, sizeof(ERR_BUF));                            \
@@ -453,11 +288,11 @@ static char ERR_BUF[256];
         }                                                               \
     } while (0)
 
-minimake_result minimake_parse(minimake* m, const char* makefile, char* buffer, size_t size) {
+minimake_result minimake_parse(minimake* m, const char* makefile, char* buffer) {
     minimake_token* tokens = NULL;
     size_t n_tokens = 0;
 
-    minimake_result result = minimake_tokenize(m, buffer, size, &tokens, &n_tokens);
+    minimake_result result = minimake_tokenize(m, buffer, &tokens, &n_tokens);
     if (!result.ok) {
         goto cleanup;
     }
@@ -621,24 +456,6 @@ cleanup:
     return result;
 }
 
-UTEST(resolve, simple_rule) {
-    minimake m = minimake_init(malloc, free);
-
-    char* makefile = "simple_rule: test-dep\n"
-                     "\ttouch simple_rule\n"
-                     "test-dep: foo bar\n";
-
-    minimake_result result = minimake_parse(&m, "Not A Real Makefile", makefile, strlen(makefile));
-    ASSERT_TRUE(result.ok);
-
-    mm_sv* chain;
-    size_t chain_len;
-    result = minimake_resolve(&m, minimake_cstr_stringview("test-test"), &chain, &chain_len);
-    ASSERT_TRUE(result.ok);
-
-    minimake_free(&m);
-}
-
 minimake_result minimake_make(minimake* m, mm_sv* target, char** cmd, size_t* cmd_capacity) {
     int found = 0;
     for (size_t j = 0; j < m->n_rules; ++j) {
@@ -754,9 +571,7 @@ cleanup:
     return result;
 }
 
-#ifdef MINIMAKE_TESTS
-UTEST_MAIN()
-#else
+#ifndef MINIMAKE_TESTS
 
 int main(int argc, char** argv) {
     memset(ERR_BUF, 0, sizeof(ERR_BUF));
@@ -769,7 +584,8 @@ int main(int argc, char** argv) {
         printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
     }
-    result = minimake_parse(&m, "Minimakefile", buffer, size);
+    buffer[size] = 0;
+    result = minimake_parse(&m, "Minimakefile", buffer);
     if (!result.ok) {
         printf("ERROR: %s (%s)\n", result.message, result.context);
         return 1;
@@ -804,4 +620,176 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+#else /* MINIMAKE_TESTS */
+
+UTEST_MAIN()
+
+UTEST(tokenize, empty) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 0);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, target_only) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "target:\n";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 3);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, target_dependency) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "target: dependency\n";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 4);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, target_dependency_command) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "target: dependency\n\tcommand\n";
+    size_t size = strlen(buffer);
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 6);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
+    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, words) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "these are words\nand these are too";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 8);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_WORD);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, specials_only) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = ":\n\n\n:::";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 7);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_COLON);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, comments) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "target: # comment\n";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 3);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, comments_and_words) {
+    minimake m = minimake_init(NULL, NULL);
+    const char* buffer = "target: # comment\nword\n";
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, buffer, &tokens, &n_tokens);
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 5);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(tokenize, complex_case) {
+    const char* makefile = "simple_rule: test-dep\n"
+                           "\ttouch simple_rule\n"
+                           "test-dep: foo bar\n";
+    minimake m = minimake_init(NULL, NULL);
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, makefile, &tokens, &n_tokens);
+    if (!result.ok) {
+        printf("error: %s\n", result.message);
+    }
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 11);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
+    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[7].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[8].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[9].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[10].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
+UTEST(resolve, simple_rule) {
+    minimake m = minimake_init(malloc, free);
+
+    char* makefile = "simple_rule: test-dep\n"
+                     "\ttouch simple_rule\n"
+                     "test-dep: foo bar\n";
+
+    minimake_result result = minimake_parse(&m, "Not A Real Makefile", makefile);
+    ASSERT_TRUE(result.ok);
+
+    mm_sv* chain;
+    size_t chain_len;
+    result = minimake_resolve(&m, minimake_cstr_stringview("test-test"), &chain, &chain_len);
+    ASSERT_TRUE(result.ok);
+
+    minimake_free(&m);
+}
 #endif
