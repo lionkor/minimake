@@ -1,9 +1,11 @@
 #include <errno.h>
+#include <linux/limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifdef MINIMAKE_TESTS
@@ -14,6 +16,7 @@
 #define UTEST(a, b) static void _test_##a_##b(void)
 #define ASSERT_TRUE(...)
 #define ASSERT_EQ(...)
+#define ASSERT_STREQ(...)
 #endif
 
 typedef struct {
@@ -47,15 +50,9 @@ typedef struct {
 typedef struct {
     minimake_rule* rules;
     size_t n_rules;
-    char* buffer;
     void* (*alloc)(size_t);
     void (*free)(void*);
 } minimake;
-
-/* initializes minimake with the given allocator and deallocator, which default to malloc/free if NULL */
-minimake minimake_init(void* (*alloc)(size_t), void (*free)(void*));
-void minimake_free(minimake* m);
-minimake_result minimake_parse(minimake* m, const char* makefile);
 
 static const minimake_result minimake_result_ok = { .ok = 1, .message = "success", .context = "no context" };
 static const minimake_result minimake_result_invalid_arguments = { .ok = 0, .message = "invalid arguments", .context = "no context" };
@@ -71,7 +68,6 @@ minimake minimake_init(void* (*alloc)(size_t), void (*dealloc)(void*)) {
 void minimake_free(minimake* m) {
     if (m) {
         m->free(m->rules);
-        m->free(m->buffer);
         m->rules = NULL;
     }
 }
@@ -374,6 +370,33 @@ UTEST(tokenize, comments_and_words) {
     minimake_free(&m);
 }
 
+UTEST(tokenize, complex_case) {
+    const char* makefile = "simple_rule: test-dep\n"
+                           "\ttouch simple_rule\n"
+                           "test-dep: foo bar\n";
+    minimake m = minimake_init(NULL, NULL);
+    minimake_token* tokens = NULL;
+    size_t n_tokens = 0;
+    minimake_result result = minimake_tokenize(&m, makefile, strlen(makefile), &tokens, &n_tokens);
+    if (!result.ok) {
+        printf("error: %s\n", result.message);
+    }
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(n_tokens, 11);
+    ASSERT_EQ(tokens[0].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[1].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[2].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[3].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[4].type, MINIMAKE_TOK_COMMAND);
+    ASSERT_EQ(tokens[5].type, MINIMAKE_TOK_NEWLINE);
+    ASSERT_EQ(tokens[6].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[7].type, MINIMAKE_TOK_COLON);
+    ASSERT_EQ(tokens[8].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[9].type, MINIMAKE_TOK_WORD);
+    ASSERT_EQ(tokens[10].type, MINIMAKE_TOK_NEWLINE);
+    minimake_free(&m);
+}
+
 static mm_sv tok_expect(minimake_token* tokens, size_t n_tokens, size_t* i, minimake_token_type type) {
     mm_sv sv = { .data = NULL, .size = 0 };
     if (*i >= n_tokens) {
@@ -406,18 +429,11 @@ static char ERR_BUF[256];
         }                                                               \
     } while (0)
 
-minimake_result minimake_parse(minimake* m, const char* makefile) {
-    char* buffer = NULL;
-    size_t size = 0;
+minimake_result minimake_parse(minimake* m, const char* makefile, char* buffer, size_t size) {
     minimake_token* tokens = NULL;
     size_t n_tokens = 0;
 
-    minimake_result result = minimake_read_makefile(m, makefile, &buffer, &size);
-    if (!result.ok) {
-        goto cleanup;
-    }
-
-    result = minimake_tokenize(m, buffer, size, &tokens, &n_tokens);
+    minimake_result result = minimake_tokenize(m, buffer, size, &tokens, &n_tokens);
     if (!result.ok) {
         goto cleanup;
     }
@@ -507,23 +523,16 @@ minimake_result minimake_parse(minimake* m, const char* makefile) {
         }
     }
 
-    m->buffer = buffer;
-    buffer = NULL;
-
 cleanup:
-    if (buffer) {
-        m->free(buffer);
-    }
     if (tokens) {
         m->free(tokens);
     }
     return result;
 }
 
-minimake_result minimake_resolve(minimake* m, mm_sv target) {
-    if (!m) {
-        return minimake_result_invalid_arguments;
-    }
+minimake_result minimake_resolve(minimake* m, mm_sv target, mm_sv** result_chain, size_t* result_chain_len) {
+    *result_chain = NULL;
+    *result_chain_len = 0;
     minimake_result result = minimake_result_ok;
 
     /* We initialize a chain (array) of targets, which will be our *inverted* todo list of targets to check.
@@ -580,7 +589,9 @@ minimake_result minimake_resolve(minimake* m, mm_sv target) {
         printf("node: %.*s\n", (int)chain[i].size, chain[i].data);
     }
 
-    // TODO: free the chain
+    *result_chain = chain;
+    *result_chain_len = n_chain;
+    chain = NULL;
 
 cleanup:
     if (chain) {
@@ -593,25 +604,151 @@ cleanup:
 UTEST(resolve, simple_rule) {
     minimake m = minimake_init(malloc, free);
 
-    minimake_rule rules[2];
-    rules[0].target = minimake_cstr_stringview("hello-world");
-    rules[1].target = minimake_cstr_stringview("test-test");
-    rules[1].dependencies[0] = minimake_cstr_stringview("hello-world");
-    rules[1].n_dependencies = 1;
+    char* makefile = "simple_rule: test-dep\n"
+                     "\ttouch simple_rule\n"
+                     "test-dep: foo bar\n";
+
+    minimake_result result = minimake_parse(&m, "Not A Real Makefile", makefile, strlen(makefile));
+    ASSERT_TRUE(result.ok);
+
+    mm_sv* chain;
+    size_t chain_len;
+    result = minimake_resolve(&m, minimake_cstr_stringview("test-test"), &chain, &chain_len);
+    ASSERT_TRUE(result.ok);
 
     minimake_free(&m);
+}
+
+minimake_result minimake_make(minimake* m, mm_sv* target, char** cmd, size_t* cmd_capacity) {
+    int found = 0;
+    for (size_t j = 0; j < m->n_rules; ++j) {
+        minimake_rule* rule = &m->rules[j];
+        if (rule->target.size == target->size && memcmp(rule->target.data, target->data, target->size) == 0) {
+            found = 1;
+            for (size_t k = 0; k < rule->n_commands; ++k) {
+                if (*cmd_capacity < rule->commands[k].size + 1) {
+                    *cmd_capacity = rule->commands[k].size + 1;
+                    m->free(*cmd);
+                    *cmd = m->alloc(*cmd_capacity);
+                    memset(*cmd, 0, *cmd_capacity);
+                }
+                memcpy(*cmd, rule->commands[k].data, rule->commands[k].size);
+                printf("%s\n", *cmd);
+                if (system(*cmd) != 0) {
+                    sprintf(ERR_BUF, "command \"%.*s\" failed", (int)rule->commands[k].size, rule->commands[k].data);
+                    return (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "command" };
+                }
+            }
+        }
+    }
+    if (!found) {
+        sprintf(ERR_BUF, "no rule to make \"%.*s\"", (int)target->size, target->data);
+        return (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "no context" };
+    }
+    return minimake_result_ok;
+}
+
+minimake_result minimake_execute_chain(minimake* m, mm_sv* chain, size_t chain_len) {
+    char filename[PATH_MAX];
+    size_t cmd_capacity = 0;
+    char* cmd = NULL;
+    minimake_result result = minimake_result_ok;
+    memset(ERR_BUF, 0, sizeof(ERR_BUF));
+    memset(filename, 0, sizeof(filename));
+    for (ssize_t i = chain_len - 1; i > -1; --i) {
+        /* 1. check if that file exists */
+        if (chain[i].size >= PATH_MAX) {
+            result = (minimake_result) { .ok = 0, .message = "path too long", .context = "target" };
+            goto cleanup;
+        }
+        memcpy(filename, chain[i].data, chain[i].size);
+        filename[chain[i].size] = 0;
+        struct stat st;
+        if (stat(filename, &st) < 0) {
+            switch (errno) {
+            case ENOENT: {
+                /* 2a. if it doesn't exist, execute the commands */
+                minimake_result make_result = minimake_make(m, &chain[i], &cmd, &cmd_capacity);
+                if (!make_result.ok) {
+                    result = make_result;
+                    goto cleanup;
+                }
+                /* check that the rule succeeded by doing another stat */
+                if (stat(filename, &st) < 0) {
+                    sprintf(ERR_BUF, "rule \"%.*s\" should have created \"%s\", but after running the rule, minimake checked, and got the error: %s", (int)chain[i].size, chain[i].data, filename, strerror(errno));
+                    make_result = (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "stat" };
+                    goto cleanup;
+                }
+                break;
+            }
+            default:
+                sprintf(ERR_BUF, "error determining if \"%s\" exists: %s", filename, strerror(errno));
+                result = (minimake_result) { .ok = 0, .message = ERR_BUF, .context = "stat" };
+                goto cleanup;
+            }
+        } else {
+            char dep_filename[PATH_MAX];
+            /* 2b. does exist, check that the modified time of all dependencies is older than the target's modification time */
+            /* at this point, all dependencies are guaranteed to exist */
+            for (size_t rule_i = 0; rule_i < m->n_rules; ++rule_i) {
+                if (m->rules[rule_i].target.size == chain[i].size && memcmp(m->rules[rule_i].target.data, chain[i].data, chain[i].size) == 0) {
+                    int rebuilt = 0;
+                    /* check dependencies */
+                    for (size_t k = 0; !rebuilt && k < m->rules[rule_i].n_dependencies; ++k) {
+                        if (m->rules[i].dependencies[k].size >= PATH_MAX) {
+                            result = (minimake_result) { .ok = 0, .message = "path too long", .context = "dependency" };
+                            goto cleanup;
+                        }
+                        memcpy(dep_filename, m->rules[rule_i].dependencies[k].data, m->rules[rule_i].dependencies[k].size);
+                        dep_filename[m->rules[rule_i].dependencies[k].size] = 0;
+                        struct stat dep_st;
+                        if (stat(dep_filename, &dep_st) < 0) {
+                            result = (minimake_result) { .ok = 0, .message = "dependency not satisfied when it should be guaranteed, is something else modifying the filesystem?", .context = "dependency" };
+                            goto cleanup;
+                        }
+                        /* compare dependency mtime to target mtime, if target mtime < dependency mtime, make target again */
+                        if (st.st_mtim.tv_sec < dep_st.st_mtim.tv_sec) {
+                            minimake_result make_result = minimake_make(m, &chain[i], &cmd, &cmd_capacity);
+                            if (!make_result.ok) {
+                                make_result.context = "rebuild due to mtime";
+                                result = make_result;
+                                goto cleanup;
+                            }
+                            rebuilt = 1;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+cleanup:
+    if (cmd) {
+        m->free(cmd);
+    }
+    return result;
 }
 
 #ifdef MINIMAKE_TESTS
 UTEST_MAIN()
 #else
 
-int main(void) {
+int main(int argc, char** argv) {
     memset(ERR_BUF, 0, sizeof(ERR_BUF));
     minimake m = minimake_init(NULL, NULL);
-    minimake_result result = minimake_parse(&m, "Minimakefile");
+
+    char* buffer = NULL;
+    size_t size = 0;
+    minimake_result result = minimake_read_makefile(&m, "Minimakefile", &buffer, &size);
     if (!result.ok) {
         printf("ERROR: %s\n", result.message);
+        return 1;
+    }
+    result = minimake_parse(&m, "Minimakefile", buffer, size);
+    if (!result.ok) {
+        printf("ERROR: %s\n", result.message);
+        return 1;
     }
 
     /* print entire makefile and all rules */
@@ -626,11 +763,31 @@ int main(void) {
         }
     }
 
-    result = minimake_resolve(&m, m.rules[0].target);
-    if (!result.ok) {
-        printf("ERROR: %s\n", result.message);
+    mm_sv* chain;
+    size_t chain_len;
+
+    mm_sv target;
+    if (argc > 1) {
+        target = minimake_cstr_stringview(argv[1]);
+    } else {
+        target = m.rules[0].target;
     }
 
+    result = minimake_resolve(&m, target, &chain, &chain_len);
+    if (!result.ok) {
+        printf("ERROR: %s\n", result.message);
+        return 1;
+    }
+
+    /* now we have the chain, so we can start walking it */
+    result = minimake_execute_chain(&m, chain, chain_len);
+    if (!result.ok) {
+        printf("ERROR: %s\n", result.message);
+        return 1;
+    }
+
+    m.free(chain);
+    m.free(buffer);
     minimake_free(&m);
     return 0;
 }
