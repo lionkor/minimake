@@ -1433,7 +1433,7 @@ int utest_main(int argc, const char *const argv[]) {
   size_t skipped_testcases_length = 0;
   const char *filter = UTEST_NULL;
   utest_uint64_t ran_tests = 0;
-  int enable_mixed_units = 0;
+  int enable_mixed_units = 1;
   int random_order = 0;
   utest_uint32_t seed = 0;
 
