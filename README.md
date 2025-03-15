@@ -4,7 +4,7 @@ Minimake is a build system which implements a primitive subset of Make[[1](https
 
 It aims to be so simple that the `minimake.c` can be distributed with a program's source code, such that only a C compiler is required to bootstrap the entire build system. Alternatively, an existing `make` command can be used due to the [compatibility with make](#compatibility).
 
-I was inspired to build this by the [no-build ("nob") build system](https://github.com/tsoding/nob.h). I find this approach meaningful, but I'd rather write simple Makefile rules.
+I was inspired to build this by the [no-build ("nob") build system](https://github.com/tsoding/nob.h). I find this approach meaningful, but I'd rather write simple Makefile rules than C code that calls into a library.
 
 ## What does it do?
 
