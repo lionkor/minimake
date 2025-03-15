@@ -1,6 +1,6 @@
 # minimake
 
-Minimake is a build system which implements a primitive subset of Make[[1](https://www.gnu.org/software/make/),[2](https://wiki.netbsd.org/tutorials/bsd_make/)].
+Minimake is a build system which implements a primitive subset of Make[[1](https://www.gnu.org/software/make/),[2](https://wiki.netbsd.org/tutorials/bsd_make/)]. This means that it can produce targets by running commands when dependencies change.
 
 It aims to be so simple that the `minimake.c` can be distributed with a program's source code, such that only a C compiler is required to bootstrap the entire build system. Alternatively, an existing `make` command can be used due to the [compatibility with make](#compatibility).
 
