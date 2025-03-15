@@ -23,7 +23,7 @@ It's like GNU/BSD Make, but:
 
 ## Compatibility
 
-*All* Minimake make-files are *valid GNU/BSD Makefiles*.
+**All** Minimake make-files are **valid GNU/BSD Makefiles**.
 
 ## Example
 
