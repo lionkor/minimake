@@ -585,10 +585,6 @@ minimake_result minimake_resolve(minimake* m, mm_sv target, mm_sv** result_chain
         }
     }
 
-    for (size_t i = 0; i < n_chain; ++i) {
-        printf("node: %.*s\n", (int)chain[i].size, chain[i].data);
-    }
-
     *result_chain = chain;
     *result_chain_len = n_chain;
     chain = NULL;
@@ -749,18 +745,6 @@ int main(int argc, char** argv) {
     if (!result.ok) {
         printf("ERROR: %s\n", result.message);
         return 1;
-    }
-
-    /* print entire makefile and all rules */
-    for (size_t i = 0; i < m.n_rules; ++i) {
-        minimake_rule* rule = &m.rules[i];
-        printf("rule: %.*s\n", (int)rule->target.size, rule->target.data);
-        for (size_t j = 0; j < rule->n_dependencies; ++j) {
-            printf("  dependency: %.*s\n", (int)rule->dependencies[j].size, rule->dependencies[j].data);
-        }
-        for (size_t j = 0; j < rule->n_commands; ++j) {
-            printf("  command: %.*s\n", (int)rule->commands[j].size, rule->commands[j].data);
-        }
     }
 
     mm_sv* chain;

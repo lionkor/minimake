@@ -1,3 +1,2 @@
 minimake: minimake.c vendor/utest.h
-    cc -o minmake minimake.c
-
+	cc -o minimake minimake.c
