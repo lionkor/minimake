@@ -204,7 +204,7 @@ static minimake_result minimake_tokenize(minimake* m, const char* buffer, minima
                 ++p;
                 ++column;
             }
-            // unskip the newline so we can tokenize it
+            /* unskip the newline so we can tokenize it */
             if (*p == '\n') {
                 --p;
             }
@@ -307,7 +307,7 @@ minimake_result minimake_parse(minimake* m, const char* makefile, char* buffer) 
     size_t i = 0;
 
     for (m->n_rules = 0; i < n_tokens; ++m->n_rules) {
-        // quick and dirty realloc :^)
+        /* quick and dirty realloc :^) */
         if (m->n_rules > rules_capacity) {
             rules_capacity *= 2;
             minimake_rule* new_rules = m->alloc(sizeof(minimake_rule) * rules_capacity);
